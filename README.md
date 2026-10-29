@@ -40,7 +40,8 @@ Home button brings that up; it reads nothing in other apps.
 
 ## Install
 
-**On the TV, with the Downloader app:** enter this address (it always serves the newest release):
+**On the TV, with the Downloader app:** enter the code **`9211994`** (or the full address below).
+Both always get the newest release.
 
 ```
 https://github.com/pipetogrep/better-tv/releases/latest/download/better-tv.apk

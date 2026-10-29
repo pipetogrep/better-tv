@@ -40,7 +40,13 @@ Home button brings that up; it reads nothing in other apps.
 
 ## Install
 
-Download the APK from [Releases](../../releases/latest), then:
+**On the TV, with the Downloader app:** enter this address (it always serves the newest release):
+
+```
+https://github.com/pipetogrep/better-tv/releases/latest/download/better-tv.apk
+```
+
+**From a computer:** download the APK from [Releases](../../releases/latest), then:
 
 ```sh
 adb connect <tv-ip>:5555

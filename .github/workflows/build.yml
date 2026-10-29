@@ -93,10 +93,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # Re-running a tag's build replaces the APK instead of failing.
+          # Also as better-tv.apk, so .../releases/latest/download/better-tv.apk is always the
+          # newest release (the link behind the Downloader code in the README).
+          cp better-tv-*.apk better-tv.apk
+          # Re-running a tag's build replaces the APKs instead of failing.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" better-tv-*.apk --clobber
+            gh release upload "$GITHUB_REF_NAME" better-tv-*.apk better-tv.apk --clobber
           else
-            gh release create "$GITHUB_REF_NAME" better-tv-*.apk \
+            gh release create "$GITHUB_REF_NAME" better-tv-*.apk better-tv.apk \
               --title "Better TV ${{ needs.apk.outputs.version }}" --generate-notes
           fi

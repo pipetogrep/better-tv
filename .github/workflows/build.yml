@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # build.sh numbers versions by commit count and names them by tag
 
       - uses: actions/setup-java@v6
         with:
@@ -51,7 +53,6 @@ jobs:
 
       - name: Build
         env:
-          VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
           RELEASE_KEYSTORE_PASS: ${{ secrets.SIGNING_KEYSTORE_PASS }}
           RELEASE_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}

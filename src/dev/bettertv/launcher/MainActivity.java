@@ -214,7 +214,8 @@ public class MainActivity extends Activity {
         focusIndex(0);
         Motion.cascade(tiles, dp(18));  // first appearance: the apps arrive one after another
         registerPackageReceiver();
-        if (Startup.justBooted()) Startup.onBoot(this);  // Start with the TV
+        // Start with the TV: only as the home app (opening Better TV by hand mustn't launch anything).
+        if (Startup.justBooted() && Perms.isDefaultHome(this)) Startup.onBoot(this);
         wakeReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent i) {
                 Startup.onScreenOn(c);  // also fired by PowerService; repeats are dropped
@@ -289,9 +290,11 @@ public class MainActivity extends Activity {
         if (!ws.equals(wallStyle) || "photo".equals(ws) && photoDay() != wallDay) {
             wallStyle = ws;
             wallDay = photoDay();
-            setWallpaper(ws);
+            changeWallpaper(ws);
         }
-        if (returningFromSettings && !folderMode && launchOverlay == null && moveIndex < 0) reload(currentKey());
+        if (returningFromSettings && !layoutSig().equals(settingsSig) && !folderMode && launchOverlay == null && moveIndex < 0) {
+            reload(currentKey());
+        }
         returningFromSettings = false;
         if (launchOverlay != null) finishLaunchReturn();
         // Setup not finished (e.g. Home was pressed during it): pick it up again.
@@ -331,6 +334,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        io.shutdown();  // a recreate() would otherwise leave this thread behind
         if (pkgReceiver != null) unregisterReceiver(pkgReceiver);
         if (netCallback != null) {
             try {
@@ -354,6 +358,7 @@ public class MainActivity extends Activity {
         wallView = new ImageView(this);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
         wallStyle = Profiles.homePrefs(this).getString("wallpaper", MainActivity.DEFAULT_WALL);
+        wallDay = photoDay();
         setWallpaper(wallStyle);
         root.addView(wallView, match());
 
@@ -630,6 +635,21 @@ public class MainActivity extends Activity {
         invalidateGlass();
     }
 
+    /** A new background after start-up: decoded on io, shown when ready (the old one stays till then). */
+    void changeWallpaper(String style) {
+        io.execute(() -> {
+            Bitmap wp = makeWallpaper(style);
+            Bitmap blur = Ui.glassBackdrop(wp, 192, 108);
+            handler.post(() -> {
+                if (isDestroyed() || !style.equals(wallStyle)) return;
+                wallView.setImageBitmap(wp);
+                wallBlur = blur;
+                glassBg = blur;
+                invalidateGlass();
+            });
+        });
+    }
+
     void invalidateGlass() {
         if (dockRow != null) dockRow.invalidate();
         if (clockBox != null) clockBox.invalidate();
@@ -729,11 +749,14 @@ public class MainActivity extends Activity {
         new Canvas(out).drawBitmap(raw, m, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG));
         raw.recycle();
         if (cached != null) {
-            try (java.io.FileOutputStream os = new java.io.FileOutputStream(cached)) {
+            // Written to a temp file and renamed, so a half-written file is never read back.
+            java.io.File tmp = new java.io.File(cached.getPath() + ".tmp");
+            try (java.io.FileOutputStream os = new java.io.FileOutputStream(tmp)) {
                 out.compress(Bitmap.CompressFormat.JPEG, 92, os);
-            } catch (Exception ignored) {
-                // no cache: decoded again next start
+            } catch (Exception e) {
+                tmp.delete();
             }
+            if (tmp.exists() && !tmp.renameTo(cached)) tmp.delete();
         }
         return out;
     }
@@ -876,7 +899,16 @@ public class MainActivity extends Activity {
     /** The gear in the status row: straight to Better TV's settings. */
     void openSettings() {
         returningFromSettings = true;
+        settingsSig = layoutSig();
         startActivity(new Intent(this, SettingsActivity.class));
+    }
+
+    String settingsSig = "";
+
+    /** What Settings can change about the grid: order, hidden apps and the Inputs card. */
+    String layoutSig() {
+        return prefs.getString(PREF_ORDER, "") + "|" + prefs.getStringSet(PREF_HIDDEN, Collections.emptySet())
+                + "|" + Inputs.showCard(this);
     }
 
     /** Height of everything in the top row (weather pill, time, buttons), in design units. */
@@ -1388,7 +1420,7 @@ public class MainActivity extends Activity {
         clockBox.animate().alpha(0f).setDuration(Motion.d(250)).start();
         weatherCard.animate().alpha(0f).setDuration(Motion.d(250)).start();
 
-        handler.postDelayed(() -> {
+        handler.postDelayed(launchRun = () -> {
             try {
                 Bundle opts = ActivityOptions.makeCustomAnimation(
                         this, R.anim.app_enter, R.anim.home_hold).toBundle();
@@ -1401,6 +1433,8 @@ public class MainActivity extends Activity {
         }, 380);
     }
 
+    Runnable launchRun;
+
     /** Coming back to Home after a launch: the card fades away and the grid zooms back in. */
     void finishLaunchReturn() {
         View ov = launchOverlay;
@@ -1408,7 +1442,8 @@ public class MainActivity extends Activity {
         launchOverlay = null;
         launchTile = null;
         if (ov == null) return;
-        handler.removeCallbacksAndMessages(null);
+        if (launchRun != null) handler.removeCallbacks(launchRun);
+        launchRun = null;
 
         scroll.setScaleX(1.06f);
         scroll.setScaleY(1.06f);
@@ -1831,7 +1866,12 @@ public class MainActivity extends Activity {
                 case KeyEvent.KEYCODE_DPAD_CENTER:
                 case KeyEvent.KEYCODE_ENTER:
                 case KeyEvent.KEYCODE_BACK:
-                case KeyEvent.KEYCODE_ESCAPE:      if (down) endMove(); return true;
+                case KeyEvent.KEYCODE_ESCAPE:
+                    if (down) {
+                        endMove();
+                        swallowUp = true;  // the release must not go to the top or open the app
+                    }
+                    return true;
                 default: return superDispatch(ev);
             }
         }
@@ -1854,17 +1894,25 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- apps
 
-    void loadApps() {
-        all.clear();
-        apps.clear();
-        hiddenApps.clear();
+    /** A freshly read app list, built without touching the live one (safe off the main thread). */
+    static final class AppList {
+        final Map<String, AppEntry> all = new LinkedHashMap<>();
+        final List<AppEntry> apps = new ArrayList<>(), hiddenApps = new ArrayList<>();
+        List<Inputs.Input> inputs = new ArrayList<>();
+    }
+
+    /** Reads the apps on this TV (PackageManager, banners, cards): slow, so callers run it on io. */
+    AppList readApps() {
+        AppList l = new AppList();
+        Map<String, AppEntry> all = l.all;
+        List<AppEntry> apps = l.apps, hiddenApps = l.hiddenApps;
         PackageManager pm = getPackageManager();
         Set<String> pkgs = new HashSet<>();
-        addResolved(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, pkgs, true);
-        addResolved(pm, Intent.CATEGORY_LAUNCHER, pkgs, false);
-        if (!pkgs.contains(TV_SETTINGS)) addSettingsEntry(pm);
-        inputs = Inputs.list(this);
-        if (Inputs.showCard(this) && !inputs.isEmpty()) addInputsEntry();
+        addResolved(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, pkgs, true, all);
+        addResolved(pm, Intent.CATEGORY_LAUNCHER, pkgs, false, all);
+        if (!pkgs.contains(TV_SETTINGS)) addSettingsEntry(pm, all);
+        l.inputs = Inputs.list(this);
+        if (Inputs.showCard(this) && !l.inputs.isEmpty()) addInputsEntry(all);
         for (AppEntry e : all.values()) {
             if (e.banner == null || TVOS_CARD_PKGS.contains(e.pkg)) {
                 e.banner = new BitmapDrawable(getResources(), tvosCard(e));
@@ -1898,10 +1946,27 @@ public class MainActivity extends Activity {
                 }
             }
         }
+            return l;
     }
 
+    /** Makes a read list the live one (main thread, or before the UI exists). */
+    void applyApps(AppList l) {
+        all.clear();
+        all.putAll(l.all);
+        apps.clear();
+        apps.addAll(l.apps);
+        hiddenApps.clear();
+        hiddenApps.addAll(l.hiddenApps);
+        inputs = l.inputs;
+    }
+
+    void loadApps() {
+        applyApps(readApps());
+    }
+
+
     /** Fallback Settings tile for TVs whose settings app has no launcher entry. */
-    void addSettingsEntry(PackageManager pm) {
+    void addSettingsEntry(PackageManager pm, Map<String, AppEntry> all) {
         AppEntry s = new AppEntry();
         s.key = SETTINGS_KEY;
         s.pkg = TV_SETTINGS;
@@ -1933,7 +1998,7 @@ public class MainActivity extends Activity {
     List<Inputs.Input> inputs = new ArrayList<>();
 
     /** Inputs card: a graphite tvOS-style card with the input glyph; OK opens the input picker. */
-    void addInputsEntry() {
+    void addInputsEntry(Map<String, AppEntry> all) {
         AppEntry e = new AppEntry();
         e.key = INPUTS_KEY;
         e.pkg = getPackageName();
@@ -1953,7 +2018,7 @@ public class MainActivity extends Activity {
         all.put(e.key, e);
     }
 
-    void addResolved(PackageManager pm, String category, Set<String> pkgs, boolean leanback) {
+    void addResolved(PackageManager pm, String category, Set<String> pkgs, boolean leanback, Map<String, AppEntry> all) {
         Intent q = new Intent(Intent.ACTION_MAIN).addCategory(category);
         for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
             ActivityInfo ai = ri.activityInfo;
@@ -2002,20 +2067,31 @@ public class MainActivity extends Activity {
         return Color.HSVToColor(hsv);
     }
 
+    /**
+     * Re-reads the apps in the background (Play Store updates, coming back from Settings) and swaps
+     * the grid in. Focus only moves if it was on a card; an open menu is closed, because its
+     * actions point at the old list.
+     */
     void reload(String focusKey) {
-        // An app installed or updated in the background (Play Store) mustn't pull focus out of the
-        // carousel the person is browsing.
-        boolean onShelf = shelfView.isFocused();
-        loadApps();
-        if (folderMode && hiddenApps.isEmpty()) folderMode = false;
-        buildGrid();
-        shelfEntry = null;
-        if (onShelf) {
-            focusedIndex = Math.min(focusedIndex, Math.max(0, shown.size() - 1));
-            return;
-        }
-        int i = focusKey == null ? -1 : indexOfKey(focusKey);
-        focusIndex(i >= 0 ? i : Math.min(focusedIndex, shown.size() - 1));
+        io.execute(() -> {
+            AppList l = readApps();
+            handler.post(() -> {
+                if (isDestroyed() || moveIndex >= 0 || launchOverlay != null) return;
+                View f = getCurrentFocus();
+                boolean onCard = f == null || tiles.contains(f);
+                closeMenu();
+                applyApps(l);
+                if (folderMode && hiddenApps.isEmpty()) folderMode = false;
+                buildGrid();
+                shelfEntry = null;
+                if (!onCard && f != null && f.isAttachedToWindow()) {
+                    focusedIndex = Math.min(focusedIndex, Math.max(0, shown.size() - 1));
+                    return;
+                }
+                int i = focusKey == null ? -1 : indexOfKey(focusKey);
+                focusIndex(i >= 0 ? i : Math.min(focusedIndex, shown.size() - 1));
+            });
+        });
     }
 
     void saveOrder() {

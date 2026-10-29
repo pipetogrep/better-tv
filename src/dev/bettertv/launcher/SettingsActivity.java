@@ -309,10 +309,18 @@ public class SettingsActivity extends Activity {
     }
 
     /** Home button override: on/off, asking for the accessibility switch when it's needed. */
+    @Override
+    protected void onDestroy() {
+        previewIo.shutdownNow();
+        super.onDestroy();
+    }
+
     static final int REQ_PHOTO = 41;
 
     ImageView preview;
-    String previewKey;
+    volatile String previewKey;
+    /** Photo previews decode one at a time; a request the user has scrolled past is skipped. */
+    final java.util.concurrent.ExecutorService previewIo = java.util.concurrent.Executors.newSingleThreadExecutor();
     final java.util.Set<android.view.View> backgroundRows = new java.util.HashSet<>();
 
     /**
@@ -365,12 +373,13 @@ public class SettingsActivity extends Activity {
             preview.setImageBitmap(MainActivity.wallpaper(key));
             return;
         }
-        new Thread(() -> {
+        previewIo.execute(() -> {
+            if (!key.equals(previewKey)) return;  // moved on before this one started
             android.graphics.Bitmap b = MainActivity.wallpaper(key);
             runOnUiThread(() -> {
                 if (key.equals(previewKey)) preview.setImageBitmap(b);
             });
-        }, "bettertv-preview").start();
+        });
     }
 
     String photoPermission() {
@@ -399,7 +408,8 @@ public class SettingsActivity extends Activity {
             return;
         }
         boolean on = PowerService.HomeButton.enabled(this);
-        if (on && !Perms.hasAccessibility(this)) {
+        if (!on && !Perms.hasAccessibility(this)) {
+            PowerService.HomeButton.setEnabled(this, true);
             Perms.requestAccessibility(this, "This TV keeps its own home screen. With Better TV\u2019s switch on, Better TV opens "
                     + "whenever that home screen appears, so the Home button brings you here.");
             return;

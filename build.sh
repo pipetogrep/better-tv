@@ -18,12 +18,16 @@ for f in "$BT/aapt2" "$BT/d8" "$JAR"; do
 done
 command -v javac >/dev/null || { echo "javac not found — install JDK 17+ or set JAVA_HOME." >&2; exit 1; }
 
+# Version: the commit count (always increasing, the same locally and on GitHub) and the latest tag.
+VERSION_CODE="${VERSION_CODE:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+VERSION_NAME="${VERSION_NAME:-$(git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)}"
+
 rm -rf build && mkdir -p build/gen build/classes build/dex
 
 "$BT/aapt2" compile --dir res -o build/res.zip
 "$BT/aapt2" link -o build/unsigned.apk -I "$JAR" --manifest AndroidManifest.xml \
     -A assets --java build/gen --min-sdk-version 24 --target-sdk-version 34 \
-    --version-code "${VERSION_CODE:-1}" --version-name "${VERSION_NAME:-1.0}" build/res.zip
+    --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" build/res.zip
 
 javac -encoding UTF-8 --release 11 -classpath "$JAR" \
     -d build/classes $(find src build/gen -name '*.java')

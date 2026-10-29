@@ -416,7 +416,7 @@ public class SetupActivity extends Activity {
         setBackdrop(cur[0]);
         LinearLayout l = list();
         List<Row> group = new ArrayList<>();
-        for (int i = 0; i < MainActivity.WALL_KEYS.length; i++) {
+        for (int i = 0; i < MainActivity.WALL_COLORS.length; i++) {  // photos are chosen in Settings
             String key = MainActivity.WALL_KEYS[i];
             Row[] self = new Row[1];
             self[0] = row(l, MainActivity.WALL_NAMES[i], null, RADIO, key.equals(cur[0]), () -> {

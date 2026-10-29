@@ -21,11 +21,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * tvOS-style settings: a main list of sections, each opening its own page, with the page's icon
- * and title on the left and its rows on the right; Back returns to the main list.
- *
- * A TMDB token can also be supplied over adb:
- *   adb shell am start -n dev.bettertv.launcher/.SettingsActivity --es tmdb_token &lt;token&gt;
+ * tvOS-style settings on one page: Better TV's icon and title on the left, every setting on the
+ * right in sections. Moving onto a background choice previews it full screen behind the page.
  */
 public class SettingsActivity extends Activity {
 
@@ -47,8 +44,7 @@ public class SettingsActivity extends Activity {
 
     FrameLayout leftPane;
     ScrollView scroller;
-    String page = ROOT, lastPage = null;
-    final java.util.Map<String, android.view.View> navRows = new java.util.HashMap<>();
+    String page = ROOT;
 
     void build() {
         FrameLayout root = new FrameLayout(this);
@@ -88,26 +84,18 @@ public class SettingsActivity extends Activity {
 
     /** Builds one page: its icon and title on the left, its rows on the right. */
     void show(String p) {
-        lastPage = page;
         page = p;
         list.removeAllViews();
         rowsByLabel.clear();
         refreshers.clear();
-        navRows.clear();
         buildLeft(p);
         backgroundRows.clear();
         preview.setVisibility(android.view.View.GONE);
         pageRoot();
         scroller.scrollTo(0, 0);
-        // Returning to the main list puts focus back on the section you came from.
-        android.view.View focus = p.equals(ROOT) && lastPage != null ? navRows.get(lastPage) : null;
-        if (focus == null) {
-            for (int i = 0; i < list.getChildCount(); i++) {
-                if (list.getChildAt(i).isFocusable()) {
-                    focus = list.getChildAt(i);
-                    break;
-                }
-            }
+        android.view.View focus = null;
+        for (int i = 0; i < list.getChildCount() && focus == null; i++) {
+            if (list.getChildAt(i).isFocusable()) focus = list.getChildAt(i);
         }
         if (focus != null) focus.requestFocus();
         list.setAlpha(0f);
@@ -117,11 +105,6 @@ public class SettingsActivity extends Activity {
         List<android.view.View> rows = new ArrayList<>();
         for (int i = 0; i < list.getChildCount(); i++) rows.add(list.getChildAt(i));
         Motion.cascade(rows, Ui.px(this, 8));
-    }
-
-    @Override
-    public void onBackPressed() {
-        super.onBackPressed();
     }
 
     @Override
@@ -291,7 +274,7 @@ public class SettingsActivity extends Activity {
         }
         section("Motion & Sound");
         row("Motion", () -> Motion.NAMES[Motion.level()], () -> {
-            String[] names = {"Full", "Reduced  (default) \u2014 shorter, no drifting or swaying", "Off \u2014 changes are instant"};
+            String[] names = {"Full", "Reduced  (default) \u2014 shorter", "Off \u2014 changes are instant"};
             dialog("Motion").setSingleChoiceItems(names, Motion.level(), (d, w) -> {
                 Motion.set(this, w);
                 d.dismiss();
@@ -310,12 +293,11 @@ public class SettingsActivity extends Activity {
         section("Setup");
         row("Run setup again", () -> "", () -> startActivity(new Intent(this, SetupActivity.class)));
         row("Reset app layout", () -> "", () -> {
-            Profiles.homePrefs(this).edit().remove("order").apply();
+            Prefs.home(this).edit().remove("order").apply();
             Toast.makeText(this, "Layout reset", Toast.LENGTH_SHORT).show();
         });
     }
 
-    /** Home button override: on/off, asking for the accessibility switch when it's needed. */
     @Override
     protected void onDestroy() {
         previewIo.shutdownNow();
@@ -352,8 +334,8 @@ public class SettingsActivity extends Activity {
         for (int i = 0; i < keys.size(); i++) {
             String key = keys.get(i);
             android.view.View r = row(names.get(i),
-                    () -> key.equals(Profiles.homePrefs(this).getString("wallpaper", MainActivity.DEFAULT_WALL)) ? "\u2713" : "",
-                    () -> Profiles.homePrefs(this).edit().putString("wallpaper", key).apply());
+                    () -> key.equals(Prefs.home(this).getString("wallpaper", MainActivity.DEFAULT_WALL)) ? "\u2713" : "",
+                    () -> Prefs.home(this).edit().putString("wallpaper", key).apply());
             android.view.View.OnFocusChangeListener style = r.getOnFocusChangeListener();
             r.setOnFocusChangeListener((v, has) -> {
                 style.onFocusChange(v, has);
@@ -394,16 +376,15 @@ public class SettingsActivity extends Activity {
                 : "android.permission.READ_EXTERNAL_STORAGE";
     }
 
-    /** "Your Photo": asks to read pictures, then says where the picture goes if there is none yet. */
+    /** Photos: asks to read pictures, then says where they go if there are none yet. */
     void usePhoto() {
         if (checkSelfPermission(photoPermission()) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{photoPermission()}, REQ_PHOTO);
             return;
         }
-        java.io.File[] f = new java.io.File(MainActivity.PHOTO_DIR).listFiles();
-        if (f == null || f.length == 0) {
-            dialog("Your Photo").setMessage("Put a picture (JPEG, PNG or WebP) in Pictures/BetterTV on this TV. "
-                    + "The newest one there becomes the background.\n\nFrom a computer:\n"
+        if (MainActivity.photoFiles().length == 0) {
+            dialog("Your Photos").setMessage("Put pictures (JPEG, PNG or WebP) in Pictures/BetterTV on this TV. "
+                    + "They appear here by name; pick one, or let them change daily.\n\nFrom a computer:\n"
                     + "adb push photo.jpg /sdcard/Pictures/BetterTV/").setPositiveButton("OK", null).show();
         }
     }

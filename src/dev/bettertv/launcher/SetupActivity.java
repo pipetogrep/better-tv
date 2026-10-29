@@ -13,7 +13,6 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -28,7 +27,7 @@ import java.util.List;
  * page's buttons (Back, Continue) as pills under it, so moving on never looks like a choice.
  * Each row says what it is: an On/Off switch, a radio dot (one of a list), or an action with its
  * state on the right ("Allow ›", "✓ Allowed"). Choices change in place; nothing moves on by itself. Pages: Welcome, look, weather,
- * home screen & permissions, done. Shown once; Settings \u2192 Home \u2192 Run Setup Again repeats it.
+ * home screen & permissions, done. Shown once; Settings \u2192 Setup \u2192 Run setup again repeats it.
  */
 public class SetupActivity extends Activity {
     static final String K_DONE = "setup_done";
@@ -412,7 +411,7 @@ public class SetupActivity extends Activity {
     void look() {
         title("Choose a Look");
         subtitle("The background behind your apps. Move through the list to preview, press OK to pick.");
-        String[] cur = {Profiles.homePrefs(this).getString("wallpaper", MainActivity.DEFAULT_WALL)};
+        String[] cur = {Prefs.home(this).getString("wallpaper", MainActivity.DEFAULT_WALL)};
         setBackdrop(cur[0]);
         LinearLayout l = list();
         List<Row> group = new ArrayList<>();
@@ -420,7 +419,7 @@ public class SetupActivity extends Activity {
             String key = MainActivity.WALL_KEYS[i];
             Row[] self = new Row[1];
             self[0] = row(l, MainActivity.WALL_NAMES[i], null, RADIO, key.equals(cur[0]), () -> {
-                Profiles.homePrefs(this).edit().putString("wallpaper", key).apply();
+                Prefs.home(this).edit().putString("wallpaper", key).apply();
                 cur[0] = key;
                 select(group, self[0]);
             });
@@ -436,7 +435,6 @@ public class SetupActivity extends Activity {
         dots();
     }
 
-    /** This profile's Home Screen: what the carousel shows, as switches. */
     void weather() {
         title("Weather");
         subtitle("A small weather card in the top-left corner of Home, with a 5-day forecast.");
@@ -509,7 +507,7 @@ public class SetupActivity extends Activity {
         clp.bottomMargin = u(18);
         page.addView(check, clp);
         title("You\u2019re All Set");
-        subtitle("Change any of this later in Settings, from the gear in Control Center.");
+        subtitle("Change any of this later in Settings, from the gear in the top-right corner.");
         buttons("Go to Home Screen", () -> {
             getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean(K_DONE, true).apply();
             startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));

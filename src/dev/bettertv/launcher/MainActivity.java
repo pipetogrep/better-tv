@@ -6,7 +6,6 @@ import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityOptions;
-import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -27,17 +26,14 @@ import android.graphics.LinearGradient;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
-import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.graphics.RenderEffect;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -45,7 +41,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
-import android.util.DisplayMetrics;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -60,7 +55,6 @@ import android.widget.ScrollView;
 import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.service.notification.NotificationListenerService;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -71,12 +65,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** tvOS-style home screen: blurred backdrop, top shelf title, rounded app tile grid. */
+/** tvOS-style home screen: a background, a glass dock and a grid of app cards. */
 public class MainActivity extends Activity {
 
     static final int COLS = 6;
     static final String SETTINGS_KEY = "special:settings";
-    static final String PRESENT_KEY = "special:present";
     static final String INPUTS_KEY = "special:inputs";
     static final String FOLDER_KEY = "special:folder";
     static final String PREF_ORDER = "order";
@@ -136,7 +129,7 @@ public class MainActivity extends Activity {
     String wallStyle;
     long wallDay;  // the day the photo background was picked for (it changes daily)
     /** What Liquid Glass samples: a blurred copy of the wallpaper. */
-    Bitmap wallBlur, glassBg;
+    Bitmap glassBg;
     final LiquidGlass.Backdrop glassSource = () -> glassBg;
     View dockRow;
     boolean returningFromSettings;
@@ -149,18 +142,13 @@ public class MainActivity extends Activity {
     int focusedIndex = 0;
     int moveIndex = -1;
     boolean folderMode;
-    boolean resumed;
     ObjectAnimator wiggle;
-    AppEntry shelfEntry;
     BroadcastReceiver pkgReceiver;
 
     /** Full-screen card that zooms out of a tile when an app is launched. */
     View launchOverlay;
     View launchTile;
 
-    final Runnable shelfUpdate = () -> {
-        if (focusedIndex >= 0 && focusedIndex < shown.size()) updateShelf(shown.get(focusedIndex));
-    };
     final Runnable reloadRun = () -> reload(currentKey());
 
     @Override
@@ -169,7 +157,7 @@ public class MainActivity extends Activity {
         // The wallpaper/artwork always covers the screen: skip the window's own full-screen fill
         // (this Mali-450 GPU is fill-rate bound, so every hidden full-screen layer costs frames).
         getWindow().setBackgroundDrawable(null);
-        prefs = Profiles.homePrefs(this);
+        prefs = Prefs.home(this);
 
         android.graphics.Point size = Ui.screen(this);
         screenW = size.x;
@@ -253,7 +241,6 @@ public class MainActivity extends Activity {
             weatherCard.setAlpha(weatherAlpha());
             launchTile = null;
             buildGrid();
-            shelfEntry = null;
             scroll.scrollTo(0, 0);
             focusIndex(0);
         } else if (launchOverlay == null) {
@@ -273,8 +260,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        resumed = true;
-        String ws = Profiles.homePrefs(this).getString("wallpaper", MainActivity.DEFAULT_WALL);
+        String ws = Prefs.home(this).getString("wallpaper", MainActivity.DEFAULT_WALL);
         if (!ws.equals(wallStyle) || "photo".equals(ws) && photoDay() != wallDay) {
             wallStyle = ws;
             wallDay = photoDay();
@@ -289,12 +275,6 @@ public class MainActivity extends Activity {
         if (!SetupActivity.done(this)) {
             startActivity(new Intent(this, SetupActivity.class));
             return;
-        }
-        // Screensaver: Better TV never holds the screen on unless the user turned the screensaver off here.
-        if (getSharedPreferences("screensaver", MODE_PRIVATE).getBoolean("allow", true)) {
-            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        } else {
-            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
         updateWeather();
         // Opened from the app list while another launcher is the home screen: offer once to take over.
@@ -315,7 +295,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        resumed = false;
         handler.removeCallbacks(weatherTick);
     }
 
@@ -341,11 +320,10 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackground(null);
 
-        // One ambient wallpaper for every app. It is drawn tiny and upscaled, so it is already
-        // soft; a slow drift keeps it alive without a per-frame blur on this weak GPU.
+        // The background: a solid colour or today's photo, behind everything.
         wallView = new ImageView(this);
         wallView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        wallStyle = Profiles.homePrefs(this).getString("wallpaper", MainActivity.DEFAULT_WALL);
+        wallStyle = Prefs.home(this).getString("wallpaper", MainActivity.DEFAULT_WALL);
         wallDay = photoDay();
         setWallpaper(wallStyle);
         root.addView(wallView, match());
@@ -412,7 +390,7 @@ public class MainActivity extends Activity {
         root.addView(clockBox, clp);
         watchNetwork();
 
-        // Weather overview in the top-left corner, over the top shelf; OK opens the forecast.
+        // Weather overview in the top-left corner; OK opens the forecast.
         weatherCard = new WeatherView(this, false, unit);
         weatherGlass = topGlass();
         weatherCard.setBackground(weatherGlass);
@@ -560,9 +538,7 @@ public class MainActivity extends Activity {
                     v.animate().withLayer().scaleX(FOCUS_SCALE).scaleY(FOCUS_SCALE).translationZ(dp(18)).setDuration(Motion.d(260))
                             .setInterpolator(LIFT).start();
                     label.animate().alpha(1f).translationY(tileH * (FOCUS_SCALE - 1f) / 2f).setDuration(Motion.d(200)).start();
-                    // Liquid-glass illumination: a glare sweeps across once, then rests and
-                    // drifts with the card's gentle sway (HIG: "gently sways while the surface
-                    // illuminates").
+                    // Liquid-glass illumination: a glare sweeps across the card once.
                     glare.animate().cancel();
                     glare.setTranslationX(-tileW * 0.7f);
                     glare.setAlpha(1f);
@@ -573,7 +549,6 @@ public class MainActivity extends Activity {
                 onTileFocused(index);
             } else {
                 cell.setTranslationZ(0);
-                stopSway(v);
                 v.animate().withLayer().scaleX(1f).scaleY(1f).translationZ(0).setDuration(Motion.d(180)).setInterpolator(EASE).start();
                 label.animate().alpha(0f).translationY(0).setDuration(Motion.d(120)).start();
                 topSheen.animate().alpha(0f).setDuration(Motion.d(160)).start();
@@ -582,11 +557,9 @@ public class MainActivity extends Activity {
             }
             v.invalidate();
         });
-        tile.setCameraDistance(9000 * unit);
         tile.setOnClickListener(v -> {
             if (moveIndex >= 0 || launchOverlay != null) return;
             // Pressed state (HIG): the card dips instantly, then the action runs.
-            stopSway(v);
             v.animate().scaleX(FOCUS_SCALE * 0.92f).scaleY(FOCUS_SCALE * 0.92f).setDuration(Motion.d(90))
                     .setInterpolator(EASE).withEndAction(() -> {
                         v.animate().scaleX(FOCUS_SCALE).scaleY(FOCUS_SCALE).setDuration(Motion.d(140)).setInterpolator(LIFT).start();
@@ -602,7 +575,6 @@ public class MainActivity extends Activity {
         return cell;
     }
 
-    /** tvOS-style ambient colour field: soft glows of indigo, teal, magenta and amber on navy. */
     java.util.concurrent.FutureTask<Bitmap> wallPrefetch;
     String wallPrefetchStyle;
 
@@ -618,8 +590,7 @@ public class MainActivity extends Activity {
         wallPrefetch = null;
         if (wp == null) wp = makeWallpaper(style);
         wallView.setImageBitmap(wp);
-        wallBlur = Ui.glassBackdrop(wp, 192, 108);
-        glassBg = wallBlur;
+        glassBg = Ui.glassBackdrop(wp, 192, 108);
         invalidateGlass();
     }
 
@@ -631,7 +602,6 @@ public class MainActivity extends Activity {
             handler.post(() -> {
                 if (isDestroyed() || !style.equals(wallStyle)) return;
                 wallView.setImageBitmap(wp);
-                wallBlur = blur;
                 glassBg = blur;
                 invalidateGlass();
             });
@@ -984,22 +954,6 @@ public class MainActivity extends Activity {
         return g;
     }
 
-    Bitmap grainBitmap;
-
-    /** Fine monochrome noise, tiled over glass to give it a frosted texture. */
-    Bitmap grain() {
-        if (grainBitmap != null) return grainBitmap;
-        int n = 96;
-        int[] px = new int[n * n];
-        java.util.Random rnd = new java.util.Random(7);
-        for (int i = 0; i < px.length; i++) {
-            int a = rnd.nextInt(14);
-            px[i] = rnd.nextBoolean() ? Color.argb(a, 255, 255, 255) : Color.argb(a, 0, 0, 0);
-        }
-        grainBitmap = Bitmap.createBitmap(px, n, n, Bitmap.Config.ARGB_8888);
-        return grainBitmap;
-    }
-
     /** A card's glass edge: a hairline of light, brightest along the top, that fades down the sides. */
     static class CardRim extends Drawable {
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1032,7 +986,7 @@ public class MainActivity extends Activity {
      * Liquid Glass (iOS/tvOS 26), drawn from what is actually behind the surface: a blurred,
      * colour-boosted copy of the backdrop aligned to the surface's screen position; a band along
      * the edges that magnifies it (lensing, like thick glass); a light tint; and a specular rim
-     * that is bright top-left and softer bottom-right. No grain.
+     * that is bright top-left and softer bottom-right.
      */
     static class LiquidGlass extends Drawable {
         interface Backdrop {
@@ -1080,7 +1034,7 @@ public class MainActivity extends Activity {
         Bitmap lumFor;
         int lumX = Integer.MIN_VALUE, lumY;
 
-        /** Never lighter than this much black: for text-heavy tiles (Control Center). */
+        /** Never lighter than this much black: for text-heavy tiles. */
         LiquidGlass darker(int alpha) {
             minBlack = alpha;
             return this;
@@ -1223,80 +1177,6 @@ public class MainActivity extends Activity {
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
 
-    /**
-     * Frosted Liquid Glass surface: tinted luminosity lift, fine frost grain, a soft inner glow
-     * at the top, gentle shade at the bottom, and a rim that catches light on the top edge and
-     * fades down the sides (no uniform outline).
-     */
-    static class FrostedGlass extends Drawable {
-        final float r, density;
-        final int tint;
-        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Paint grainPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Paint shade = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final android.graphics.RectF box = new android.graphics.RectF();
-        final android.graphics.Path clip = new android.graphics.Path();
-        /** 1 = full light-catching rim (dock); lower for small controls like the capsule. */
-        float rimStrength = 1f;
-
-        FrostedGlass(float r, int tint, Bitmap grain, float density) {
-            this.r = r;
-            this.tint = tint;
-            this.density = density;
-            fill.setColor(tint);
-            grainPaint.setShader(new android.graphics.BitmapShader(grain, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT));
-            rim.setStyle(Paint.Style.STROKE);
-            rim.setStrokeWidth(1.2f * density);
-        }
-
-        @Override protected void onBoundsChange(Rect b) {
-            box.set(b);
-            clip.reset();
-            clip.addRoundRect(box, r, r, android.graphics.Path.Direction.CW);
-            float h = box.height();
-            glow.setShader(new LinearGradient(0, box.top, 0, box.top + h * 0.45f,
-                    0x24FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
-            shade.setShader(new LinearGradient(0, box.bottom - h * 0.4f, 0, box.bottom,
-                    0x00000000, 0x1F000000, Shader.TileMode.CLAMP));
-            rim.setShader(new LinearGradient(0, box.top, 0, box.bottom,
-                    new int[]{rimA(0x52), rimA(0x14), rimA(0x06), rimA(0x0F)},
-                    new float[]{0f, 0.25f, 0.75f, 1f}, Shader.TileMode.CLAMP));
-        }
-
-        int rimA(int a) {
-            return (Math.round(a * rimStrength) << 24) | 0xFFFFFF;
-        }
-
-        @Override public void draw(Canvas c) {
-            c.save();
-            c.clipPath(clip);
-            c.drawRect(box, fill);
-            c.drawRect(box, grainPaint);
-            c.drawRect(box, glow);
-            c.drawRect(box, shade);
-            c.restore();
-            float inset = rim.getStrokeWidth() / 2f;
-            c.drawRoundRect(box.left + inset, box.top + inset, box.right - inset, box.bottom - inset,
-                    r - inset, r - inset, rim);
-        }
-
-        /** Focused: brighter glass (tvOS lifts and lightens focused glass controls). */
-        void setLit(boolean lit) {
-            fill.setColor(lit ? 0x59FFFFFF : tint);
-            invalidateSelf();
-        }
-
-        @Override public void setAlpha(int a) { }
-        @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
-        @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
-
-        @Override public boolean getPadding(Rect padding) {
-            padding.set(0, 0, 0, 0);
-            return false;
-        }
-    }
 
     /** Outline whose corner radius can be changed while animating (radius[0]). */
     ViewOutlineProvider roundedOutline(float[] r) {
@@ -1307,9 +1187,9 @@ public class MainActivity extends Activity {
         };
     }
 
-    // ---------------------------------------------------------------- suggestions carousel
+    // ---------------------------------------------------------------- remote keys for the top row
 
-    /** Remote keys for the top row (weather pill, Control Center) and the dock's edges. */
+    /** Remote keys for the top row (weather pill, settings gear) and the dock's edges. */
     boolean navKeys(KeyEvent ev) {
         if (moveIndex >= 0) return false;
         int k = ev.getKeyCode();
@@ -1355,44 +1235,18 @@ public class MainActivity extends Activity {
         return weatherCard != null && weatherCard.getVisibility() == View.VISIBLE && weatherAlpha() > 0.5f;
     }
 
-    /** Up from the shelf/dock: the tab bar, or the status row when the tab bar is hidden. */
+    /** Up from the dock: the status row. */
     void focusTop() {
         settingsButton.requestFocus();
     }
-
-    /**
-     * Artwork transition (tvOS carousel): the new image slides in from the side you pressed and
-     * fades up over the old one, which drifts the other way and fades out.
-     */
-    ObjectAnimator heroZoom;
-
-    /** Carousel focused: the dock slides away and the artwork takes the whole screen (tvOS Top Shelf). */
-    boolean heroRequested;
 
     ImageView settingsButton;
     android.net.ConnectivityManager.NetworkCallback netCallback;
     WeatherView weatherCard;
     LiquidGlass weatherGlass;
-    int avatarSize;
     FrameLayout pickerLayer;
     BroadcastReceiver wakeReceiver;
 
-
-    // ---------------------------------------------------------------- focus sway
-
-    ValueAnimator sway;
-    View swayView;
-
-    void stopSway(View v) {
-        if (sway != null && (v == null || v == swayView)) {
-            sway.cancel();
-            sway = null;
-            if (swayView != null) {
-                swayView.animate().rotationX(0).rotationY(0).setDuration(Motion.d(160)).start();
-            }
-            swayView = null;
-        }
-    }
 
     // ---------------------------------------------------------------- launch animation
 
@@ -1449,7 +1303,6 @@ public class MainActivity extends Activity {
                 Bundle opts = ActivityOptions.makeCustomAnimation(
                         this, R.anim.app_enter, R.anim.home_hold).toBundle();
                 startActivity(a.launch, opts);
-                noteLaunched(a.pkg);
             } catch (ActivityNotFoundException | SecurityException e) {
                 toast("Can't open " + a.label);
                 finishLaunchReturn();
@@ -1679,10 +1532,7 @@ public class MainActivity extends Activity {
 
     void onTileFocused(int index) {
         focusedIndex = index;
-        boolean dock = hasDock() && index < COLS;
         scrollToRow(index / COLS);
-        handler.removeCallbacks(shelfUpdate);
-        handler.postDelayed(shelfUpdate, 90);
     }
 
     /**
@@ -1698,16 +1548,11 @@ public class MainActivity extends Activity {
         glideTo(Math.max(0, target));
     }
 
-    void updateShelf(AppEntry a) {
-        shelfEntry = a;
-    }
-
     void focusIndex(int i) {
         if (tiles.isEmpty()) return;
         i = Math.max(0, Math.min(i, tiles.size() - 1));
         tiles.get(i).requestFocus();
         focusedIndex = i;
-        updateShelf(shown.get(i));
         int row = i / COLS;
         scroll.post(() -> scrollToRow(row));
     }
@@ -1820,7 +1665,6 @@ public class MainActivity extends Activity {
             folderMode = true;
             weatherCard.setAlpha(0f);
             buildGrid();
-            shelfEntry = null;
             scroll.scrollTo(0, 0);
             focusIndex(0);
         });
@@ -1831,7 +1675,6 @@ public class MainActivity extends Activity {
             folderMode = false;
             weatherCard.animate().alpha(weatherAlpha()).setDuration(Motion.d(250)).start();
             buildGrid();
-            shelfEntry = null;
             int i = indexOfKey(FOLDER_KEY);
             focusIndex(i >= 0 ? i : 0);
         });
@@ -1868,7 +1711,7 @@ public class MainActivity extends Activity {
             int pk = ev.getKeyCode();
             boolean pd = ev.getAction() == KeyEvent.ACTION_DOWN;
             if (pk == KeyEvent.KEYCODE_BACK) {
-                if (!pd) closeProfilePicker();
+                if (!pd) closePopover();
                 return true;
             }
             if (pk == KeyEvent.KEYCODE_DPAD_UP || pk == KeyEvent.KEYCODE_DPAD_DOWN
@@ -2020,13 +1863,12 @@ public class MainActivity extends Activity {
     int priority(AppEntry e) {
         if (INPUTS_KEY.equals(e.key)) return -1;
         if (isSettings(e)) return 2000;
-        if (PRESENT_KEY.equals(e.key)) return 1999;
         int i = DEFAULT_ORDER.indexOf(e.pkg);
         return i >= 0 ? i : 1000;
     }
 
     boolean isSettings(AppEntry e) {
-        return SETTINGS_KEY.equals(e.key) || TV_SETTINGS.equals(e.pkg) || PRESENT_KEY.equals(e.key);
+        return SETTINGS_KEY.equals(e.key) || TV_SETTINGS.equals(e.pkg);
     }
 
     List<Inputs.Input> inputs = new ArrayList<>();
@@ -2117,8 +1959,7 @@ public class MainActivity extends Activity {
                 applyApps(l);
                 if (folderMode && hiddenApps.isEmpty()) folderMode = false;
                 buildGrid();
-                shelfEntry = null;
-                if (!onCard && f != null && f.isAttachedToWindow()) {
+                    if (!onCard && f != null && f.isAttachedToWindow()) {
                     focusedIndex = Math.min(focusedIndex, Math.max(0, shown.size() - 1));
                     return;
                 }
@@ -2146,7 +1987,6 @@ public class MainActivity extends Activity {
         loadApps();
         if (folderMode && hiddenApps.isEmpty()) folderMode = false;
         buildGrid();
-        shelfEntry = null;
         focusIndex(Math.min(i, shown.size() - 1));
         toast(hide ? a.label + " moved to More Apps" : a.label + " is back on Home");
     }
@@ -2210,14 +2050,14 @@ public class MainActivity extends Activity {
         showMenu(tile, a.label, labels, actions, labels.indexOf("Uninstall"));
     }
 
-    // ---------------------------------------------------------------- Control Center
+    // ---------------------------------------------------------------- popover tiles
 
     interface Status {
         String get();
     }
 
     /**
-     * One Control Center tile: glass with glyph (+ title / live status). Square tiles stack the
+     * One popover tile: glass with glyph (+ title / live status). Square tiles stack the
      * glyph over the title; capsules put the glyph left of two lines; circles are glyph-only.
      * Focus: the glass lights up and the tile lifts.
      */
@@ -2236,7 +2076,7 @@ public class MainActivity extends Activity {
         t.setPadding(circle ? 0 : dp(16), 0, circle ? 0 : dp(14), 0);
         int gs = square ? dp(54) : circle ? dp(30) : dp(28);
         ImageView gi = new ImageView(this);
-        gi.setImageBitmap(Glyphs.get(glyph, gs, glyph.equals("wifi") ? 0xFF0A84FF : Color.WHITE));
+        gi.setImageBitmap(Glyphs.get(glyph, gs, Color.WHITE));
         t.addView(gi, new LinearLayout.LayoutParams(gs, gs));
         TextView sub = null;
         TextView[] titleRef = {null};
@@ -2269,10 +2109,10 @@ public class MainActivity extends Activity {
         GradientDrawable white = new GradientDrawable();
         white.setCornerRadius(radius);
         white.setColor(0xF7FFFFFF);
-        int glyphColor = glyph.equals("wifi") ? 0xFF0A84FF : Color.WHITE;
+        int glyphColor = Color.WHITE;
         t.setOnFocusChangeListener((v, has) -> {
             t.setBackground(has ? white : glass);
-            gi.setImageBitmap(Glyphs.get(glyph, gs, has ? (glyph.equals("wifi") ? 0xFF0A84FF : 0xFF111114) : glyphColor));
+            gi.setImageBitmap(Glyphs.get(glyph, gs, has ? 0xFF111114 : glyphColor));
             TextView tt = titleRef[0];
             if (tt != null) {
                 tt.setTextColor(has ? 0xFF111114 : Color.WHITE);
@@ -2281,10 +2121,6 @@ public class MainActivity extends Activity {
             if (subRef != null) {
                 subRef.setTextColor(has ? 0xB3111114 : Color.WHITE);
                 subRef.setShadowLayer(has ? 0 : dp(4), 0, has ? 0 : dp(1), 0x99000000);
-            }
-            if (memBarFill != null && memBarFill.getParent() != null && v == ((View) memBarFill.getParent()).getParent().getParent()) {
-                ((GradientDrawable) ((View) memBarFill.getParent()).getBackground()).setColor(has ? 0x33111114 : 0x40FFFFFF);
-                ((GradientDrawable) memBarFill.getBackground()).setColor(has ? 0xFF111114 : (memoryUsed() > 0.85f ? 0xFFFF9F0A : Color.WHITE));
             }
             v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).translationZ(has ? dp(10) : 0)
                     .setDuration(Motion.d(200)).setInterpolator(LIFT).start();
@@ -2300,38 +2136,9 @@ public class MainActivity extends Activity {
         return t;
     }
 
-    // ---------------------------------------------------------------- memory
-
-    float memoryUsed() {
-        android.app.ActivityManager am = getSystemService(android.app.ActivityManager.class);
-        android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
-        am.getMemoryInfo(mi);
-        return mi.totalMem > 0 ? 1f - mi.availMem / (float) mi.totalMem : 0f;
-    }
-
-    View memBarFill;
-
-    /** Apps opened from Home recently, newest first (Android hides other apps' processes). */
-    void noteLaunched(String pkg) {
-        if (pkg == null || pkg.equals(getPackageName())) return;
-        List<String> l = new ArrayList<>(Arrays.asList(getSharedPreferences("clean", MODE_PRIVATE).getString("recent", "").split(",")));
-        l.remove(pkg);
-        l.remove("");
-        l.add(0, pkg);
-        while (l.size() > 12) l.remove(l.size() - 1);
-        getSharedPreferences("clean", MODE_PRIVATE).edit().putString("recent", String.join(",", l)).apply();
-    }
-
-    long availMem(android.app.ActivityManager am) {
-        android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
-        am.getMemoryInfo(mi);
-        return mi.availMem;
-    }
-
-
     // ---------------------------------------------------------------- inputs
 
-    /** Input picker under the status row: Control Center capsules, two columns. */
+    /** Input picker under the status row: glass capsules, two columns. */
     void showInputs(View from) {
         List<Inputs.Input> list = Inputs.list(this);
         if (list.isEmpty()) {
@@ -2339,7 +2146,6 @@ public class MainActivity extends Activity {
             return;
         }
         dropPicker();
-        stopSway(null);
         popoverReturn = from;
         FrameLayout layer = new FrameLayout(this);
         layer.setClickable(true);
@@ -2362,7 +2168,7 @@ public class MainActivity extends Activity {
             int x = (i % 2) * (col + gap), y = top + (i / 2) * (cap + gap);
             cells.add(ccTile(panel, x, y, col, cap, Inputs.glyph(in), in.label,
                     in.disconnected ? () -> "Not connected" : null, false, v -> {
-                        closeProfilePicker();
+                        closePopover();
                         if (!Inputs.open(this, in)) toast("Can't switch to " + in.label);
                     }));
         }
@@ -2446,9 +2252,8 @@ public class MainActivity extends Activity {
 
     /**
      * Once a minute: fetch when the forecast is due (every 15 minutes by default), move "Now" on,
-     * and pick up Wi-Fi signal changes.
+     * and pick up connection changes.
      */
-    int tickCount;
     final Runnable weatherTick = new Runnable() {
         @Override public void run() {
             Weather.refresh(MainActivity.this, false, MainActivity.this::updateWeather);
@@ -2480,7 +2285,6 @@ public class MainActivity extends Activity {
         Weather.Data d = Weather.cached(this);
         if (d == null) return;
         dropPicker();
-        stopSway(null);
         popoverReturn = weatherCard;
         FrameLayout layer = new FrameLayout(this);
         layer.setClickable(true);
@@ -2520,7 +2324,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    // ---------------------------------------------------------------- profiles
+    // ---------------------------------------------------------------- popovers
 
     List<View> pickerCells = new ArrayList<>();
 
@@ -2576,7 +2380,7 @@ public class MainActivity extends Activity {
 
     View popoverReturn;
 
-    void closeProfilePicker() {
+    void closePopover() {
         if (pickerLayer == null) return;
         FrameLayout l = pickerLayer;
         pickerLayer = null;
@@ -2586,10 +2390,6 @@ public class MainActivity extends Activity {
         if (popoverReturn != null && popoverReturn.isAttachedToWindow()) popoverReturn.requestFocus();
         else goTop();
         popoverReturn = null;
-    }
-
-    interface NameResult {
-        void ok(String name);
     }
 
     // ---------------------------------------------------------------- tvOS context menu
@@ -2604,7 +2404,6 @@ public class MainActivity extends Activity {
     void showMenu(View anchor, String title, List<String> labels, List<Runnable> actions, int destructive) {
         closeMenu();
         menuReturnFocus = anchor;
-        stopSway(null);
         menuLayer = new FrameLayout(this);
         menuLayer.setBackgroundColor(0x00000000);
         menuLayer.setClickable(true);
@@ -2720,7 +2519,6 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- move mode
 
     void startMove(int index) {
-        stopSway(null);
         moveIndex = index;
         focusIndex(index);
         startWiggle(tiles.get(index));

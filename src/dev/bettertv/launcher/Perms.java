@@ -1,9 +1,6 @@
 package dev.bettertv.launcher;
 
-import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -12,18 +9,11 @@ import android.os.Build;
 import android.provider.Settings;
 
 /**
- * Permissions, asked for on screen wherever the TV allows it; adb is only the last resort.
- * - Location (Wi-Fi name): the normal runtime prompt.
- * - Device admin (Power Off, Sleep Timer): Android's "Activate device admin app?" screen.
- * - Notification access (Do Not Disturb): the system's notification-access screen (Android 11+
- *   opens Better TV's own switch directly).
- * Some TVs (e.g. Android 9 builds) have no screen for the last two; only then is the
- * one-time computer command shown.
+ * The two things Better TV asks Android for, on screen wherever the TV allows it (adb only as
+ * the last resort): being the home app, and its accessibility switch (Home button on TVs that
+ * keep their own launcher, and opening an app when the TV wakes).
  */
 final class Perms {
-    static final int REQ_LOCATION = 41;
-    static final int REQ_TV_LISTINGS = 43;
-
     private Perms() {
     }
 
@@ -33,7 +23,7 @@ final class Perms {
         return cn == null || cn.getClassName().contains("Stub") ? null : i;
     }
 
-    /** Better TV's accessibility switch is on (Power Off fallback, Clean, Home button, waking into an app). */
+    /** Better TV's accessibility switch is on (Home button, waking into an app). */
     static boolean hasAccessibility(Activity a) {
         return PowerService.instance != null;
     }

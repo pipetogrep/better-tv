@@ -8,12 +8,11 @@ import android.view.animation.PathInterpolator;
 import java.util.List;
 
 /**
- * Motion setting (Settings → Home → Motion & Sound, or Control Center), for the whole TV:
- * - Full: every transition, plus ambient motion (wallpaper drift, focus sway, slow carousel zoom).
- * - Reduced: transitions at 60% length, no ambient motion and shorter slides.
+ * Motion setting (Settings → Motion & Sound), for the whole TV:
+ * - Full: every transition at full length.
+ * - Reduced: transitions at 60% length and shorter slides.
  * - Off: changes are instant; nothing moves on its own.
- * Every animation duration in Better TV goes through {@link #d}; looping animations ask {@link #ambient}
- * first (a zero-length loop would spin). Read once and cached, since it is used on every frame.
+ * Every animation duration in Better TV goes through {@link #d}. Read once and cached, since it is used on every frame.
  */
 final class Motion {
     static final int FULL = 0, REDUCED = 1, OFF = 2;
@@ -41,11 +40,6 @@ final class Motion {
         prefs(c).edit().putInt("level", l).apply();
     }
 
-    /** Full → Reduced → Off → Full (Control Center). */
-    static void cycle(Context c) {
-        set(c, (level() + 1) % 3);
-    }
-
     /** An animation's length under the current setting (ms). */
     static long d(long ms) {
         switch (level()) {
@@ -64,10 +58,6 @@ final class Motion {
         }
     }
 
-    /** Motion that runs by itself (loops, drift, sway, slow zoom): only at Full. */
-    static boolean ambient() {
-        return level() == FULL;
-    }
 
     /** Apple's ease-out for things settling into place. */
     static final PathInterpolator SETTLE = new PathInterpolator(0.2f, 0f, 0f, 1f);

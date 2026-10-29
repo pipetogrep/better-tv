@@ -16,13 +16,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * "Start with the TV" (Settings → Home): when the TV starts, or also whenever it wakes from
- * standby, open an app or a TV input instead of staying on Home. For the whole TV, not per
- * profile. Fired once per boot (boot broadcast or Home starting just after boot, whichever comes
- * first) and on SCREEN_ON. Android lets an app open a screen from the background only in a few
+ * "Start with the TV" (Settings → Start with the TV): when the TV starts, or also whenever it
+ * wakes from standby, open an app or a TV input instead of staying on Home. Fired once per boot
+ * (Home starting just after boot as the home app, or the accessibility switch connecting) and on
+ * SCREEN_ON. Android lets an app open a screen from the background only in a few
  * cases; Better TV's accessibility switch is one, so waking into an app is reliable only with it on
- * (at boot Better TV is usually on screen anyway, as the home app). Presentation's own "Start on boot"
- * takes precedence at boot.
+ * (at boot Better TV is usually on screen anyway, as the home app).
  */
 final class Startup {
     static final String K_TARGET = "target", K_LABEL = "label", K_WAKE = "on_wake";
@@ -61,7 +60,7 @@ final class Startup {
         prefs(c).edit().putBoolean(K_WAKE, on).apply();
     }
 
-    /** Whether this wake will open something (so Home skips the "Who's watching?" picker). */
+    /** Whether this wake will open something. */
     static boolean opensOnWake(Context c) {
         return !target(c).isEmpty() && onWake(c);
     }

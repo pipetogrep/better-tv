@@ -7,7 +7,7 @@ import android.view.KeyEvent;
 /**
  * Navigation sounds using Android TV's own system sounds (the same clicks Google's launcher and
  * Settings use): a per-direction focus sound when moving and the key click on select and Back,
- * played at 60% of the normal sound-effect level. Settings -> Home -> Navigation sounds.
+ * played at 60% of the normal sound-effect level. Settings → Motion & Sound → Navigation sounds.
  */
 final class Clicks {
     static final float VOLUME = 0.6f;

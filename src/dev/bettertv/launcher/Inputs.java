@@ -14,10 +14,10 @@ import java.util.List;
 /**
  * TV inputs (HDMI, AV, component, tuner) from Android's TV input framework, and switching to
  * one the way the stock launcher does: VIEW the input's passthrough "channel" so the TV app
- * shows it. Boxes without inputs (e.g. a Mi Box) report none, and the Inputs card and button hide.
+ * shows it. Boxes without inputs (e.g. a Mi Box) report none, and the Inputs card hides.
  */
 final class Inputs {
-    static final String K_CARD = "inputs_card", K_BUTTON = "inputs_button";
+    static final String K_CARD = "inputs_card";
 
     private Inputs() {
     }

@@ -708,6 +708,19 @@ public class MainActivity extends Activity {
         return files;
     }
 
+    /** Removes cached crops of pictures that are gone, were replaced, or were cut for another screen size. */
+    static void trimPhotoCache() {
+        if (photoCacheDir == null) return;
+        Set<String> keep = new HashSet<>();
+        for (java.io.File f : photoFiles()) keep.add(photoCacheName(f));
+        java.io.File[] cached = photoCacheDir.listFiles((d, n) -> n.startsWith("photo-"));
+        if (cached != null) for (java.io.File c : cached) if (!keep.contains(c.getName())) c.delete();
+    }
+
+    static String photoCacheName(java.io.File f) {
+        return "photo-" + f.getName().hashCode() + "-" + f.lastModified() + "-" + photoW + "x" + photoH + ".jpg";
+    }
+
     /** A picture's name for Settings: "06-infra-7110-ridge.jpg" -> "Infra 7110 Ridge". */
     static String photoName(String file) {
         String n = file.replaceFirst("\\.[^.]+$", "").replaceFirst("^[0-9]+[-_ ]+", "").replaceAll("[-_]+", " ").trim();
@@ -722,8 +735,7 @@ public class MainActivity extends Activity {
 
     /** One picture, decoded at screen size and centre-cropped (cached once cropped); null if unreadable. */
     static Bitmap loadPhotoFile(java.io.File f) {
-        java.io.File cached = photoCacheDir == null ? null : new java.io.File(photoCacheDir,
-                "photo-" + f.getName().hashCode() + "-" + f.lastModified() + "-" + photoW + "x" + photoH + ".jpg");
+        java.io.File cached = photoCacheDir == null ? null : new java.io.File(photoCacheDir, photoCacheName(f));
         if (cached != null && cached.exists()) {
             android.graphics.BitmapFactory.Options co = new android.graphics.BitmapFactory.Options();
             co.inMutable = true;  // bakeShade paints into it
@@ -757,6 +769,7 @@ public class MainActivity extends Activity {
                 tmp.delete();
             }
             if (tmp.exists() && !tmp.renameTo(cached)) tmp.delete();
+            trimPhotoCache();
         }
         return out;
     }
@@ -789,6 +802,29 @@ public class MainActivity extends Activity {
      * tvOS-style card: soft vertical gradient with a top sheen and the app's glyph centred.
      * Settings gets the silver card with a drawn gear, like tvOS.
      */
+    /**
+     * A banner redrawn once at the size it is shown (the focused, 1.2x card), centre-cropped to
+     * 16:9. App banners arrive at 640x360 or larger; holding them at that size cost ~1 MB each.
+     */
+    Drawable fitBanner(Drawable d) {
+        int w = Math.round(tileW * FOCUS_SCALE), h = w * 9 / 16;
+        if (d == null || w <= 0) return d;
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+        Rect old = d.copyBounds();
+        if (iw <= 0 || ih <= 0) {
+            d.setBounds(0, 0, w, h);
+        } else {
+            float s = Math.max(w / (float) iw, h / (float) ih);
+            int dw = Math.round(iw * s), dh = Math.round(ih * s);
+            d.setBounds((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
+        }
+        d.draw(c);
+        d.setBounds(old);
+        return new BitmapDrawable(getResources(), b);
+    }
+
     Bitmap tvosCard(AppEntry e) {
         int w = 640, h = 360;
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -1709,7 +1745,13 @@ public class MainActivity extends Activity {
         f.key = FOLDER_KEY;
         f.label = "More Apps";
         f.color = 0xFF3A3A3C;
-        f.banner = new BitmapDrawable(getResources(), folderArt());
+        StringBuilder sig = new StringBuilder();
+        for (AppEntry e : hiddenApps) sig.append(e.key).append(',');
+        if (folderBanner == null || !sig.toString().equals(folderSig)) {
+            folderBanner = new BitmapDrawable(getResources(), folderArt());
+            folderSig = sig.toString();
+        }
+        f.banner = folderBanner;
         f.icon = f.banner;
         return f;
     }
@@ -1718,6 +1760,9 @@ public class MainActivity extends Activity {
      * Folder card, as tvOS draws folders: a neutral dark card holding miniatures of the apps
      * inside (up to nine, 3x3, each in its own 16:9 banner shape); empty slots are faint.
      */
+    Drawable folderBanner;
+    String folderSig;
+
     Bitmap folderArt() {
         int w = 640, h = 360;
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
@@ -1917,6 +1962,7 @@ public class MainActivity extends Activity {
             if (e.banner == null || TVOS_CARD_PKGS.contains(e.pkg)) {
                 e.banner = new BitmapDrawable(getResources(), tvosCard(e));
             }
+            e.banner = fitBanner(e.banner);
         }
 
         Set<String> hidden = prefs.getStringSet(PREF_HIDDEN, Collections.emptySet());

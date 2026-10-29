@@ -36,10 +36,17 @@ final class WeatherView extends View {
     }
 
     void setData(Weather.Data d) {
+        // Called every minute: only re-measure (and redraw) when what the pill shows changed.
+        String sig = d == null ? "" : d.temp + "|" + d.code + "|" + d.day + "|" + d.place + "|" + d.max + "|" + d.min;
+        boolean same = sig.equals(shownSig);
         data = d;
+        shownSig = sig;
+        if (same && !full) return;
         if (!full) requestLayout();  // the pill fits its content
         invalidate();
     }
+
+    String shownSig;
 
     /** The pill wraps its content: symbol, temperature, then the wider of place and condition. */
     @Override

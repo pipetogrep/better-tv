@@ -14,7 +14,15 @@ a() { "$ADB" -s "$TV" "$@"; }
 
 build() { ./build.sh; }
 install() { a install -r "$APK"; }
-launch() { a shell am force-stop "$PKG"; a shell am start -W -n "$PKG/.MainActivity" | grep -E "Activity|TotalTime"; }
+# Cold start, as Android reports it ("Displayed ... +NNNms"). As the home app, Better TV is
+# restarted by the system as soon as it is stopped, so am start -W can't time it.
+launch() {
+    a logcat -c
+    a shell am force-stop "$PKG"
+    a shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1 || true
+    sleep 3
+    a logcat -d | grep -m1 "Displayed $PKG" | sed 's/.*Displayed/Displayed/' || echo "started"
+}
 perf() {
     a shell dumpsys gfxinfo "$PKG" reset >/dev/null
     a shell 'for k in 22 22 22 22 22 21 21 21 21 21 20 19 22 22 22 20 20 21 21 19 19 22 22 22 22 21 21 21 21 21; do input keyevent $k; sleep 0.35; done'

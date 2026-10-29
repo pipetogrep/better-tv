@@ -26,24 +26,38 @@ rm -rf build && mkdir -p build/gen build/classes build/dex
 
 "$BT/aapt2" compile --dir res -o build/res.zip
 "$BT/aapt2" link -o build/unsigned.apk -I "$JAR" --manifest AndroidManifest.xml \
-    -A assets -0 ttf --java build/gen --min-sdk-version 24 --target-sdk-version 34 \
+    -A assets -0 ttf --java build/gen --min-sdk-version 28 --target-sdk-version 34 \
     --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" build/res.zip
 
-javac -encoding UTF-8 --release 11 -classpath "$JAR" \
+javac -encoding UTF-8 --release 11 -Xlint:deprecation -classpath "$JAR" \
     -d build/classes $(find src build/gen -name '*.java')
-"$BT/d8" --release --min-api 24 --lib "$JAR" --output build/dex $(find build/classes -name '*.class')
-(cd build/dex && zip -q ../unsigned.apk classes.dex)
+"$BT/d8" --release --min-api 28 --lib "$JAR" --output build/dex $(find build/classes -name '*.class')
+# A fixed timestamp on classes.dex, so the same source gives the same APK.
+(cd build/dex && touch -t 198001010000 classes.dex && zip -qX ../unsigned.apk classes.dex)
 
 "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
 
-# Signing. Release builds: RELEASE_KEYSTORE + RELEASE_KEYSTORE_PASS (the private key lives in the
-# separate, private signing repo). Development builds: a local debug key, created on
-# first use and never committed (it's in .gitignore).
+# Signing, first match wins:
+# 1. RELEASE_KEYSTORE + RELEASE_KEYSTORE_PASS (+ RELEASE_KEY_ALIAS): GitHub Actions, from secrets.
+# 2. ~/.config/bettertv/release.keystore + keystore-password (chmod 600): this machine's copy.
+# 3. A throwaway debug.keystore (created on first use, never committed): other machines. Its
+#    APKs won't install over a release.
+# signing/lineage.bin (public: certificates only) records the move from the original key to the
+# release key, so APKs signed with it update installs made with the original key (Android 9+).
+LINEAGE=()
+# With the lineage, sign with APK Signature Scheme v3 only (Android 9+, which minSdk 28 guarantees):
+# v1/v2 would need the original key, which release signing no longer uses.
+[ -f signing/lineage.bin ] && LINEAGE=(--lineage signing/lineage.bin --v1-signing-enabled false --v2-signing-enabled false --v3-signing-enabled true --rotation-min-sdk-version 28)
+LOCAL_KS="$HOME/.config/bettertv/release.keystore"
 if [ -n "${RELEASE_KEYSTORE:-}" ]; then
     [ -n "${RELEASE_KEYSTORE_PASS:-}" ] || { echo "Set RELEASE_KEYSTORE_PASS for $RELEASE_KEYSTORE" >&2; exit 1; }
     "$BT/apksigner" sign --ks "$RELEASE_KEYSTORE" --ks-pass env:RELEASE_KEYSTORE_PASS \
-        --ks-key-alias "${RELEASE_KEY_ALIAS:-bettertv-release}" --out build/better-tv.apk build/aligned.apk
+        --ks-key-alias "${RELEASE_KEY_ALIAS:-bettertv}" "${LINEAGE[@]}" --out build/better-tv.apk build/aligned.apk
     echo "Signed with the release key"
+elif [ -f "$LOCAL_KS" ]; then
+    "$BT/apksigner" sign --ks "$LOCAL_KS" --ks-pass "file:$HOME/.config/bettertv/keystore-password" \
+        --ks-key-alias bettertv "${LINEAGE[@]}" --out build/better-tv.apk build/aligned.apk
+    echo "Signed with the release key (~/.config/bettertv)"
 else
     KS=debug.keystore
     if [ ! -f "$KS" ]; then
@@ -52,7 +66,7 @@ else
     fi
     "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
         --out build/better-tv.apk build/aligned.apk
-    echo "Signed with the local debug key (development build)"
+    echo "Signed with a local debug key: this APK won't install over a release"
 fi
 
 echo "Built build/better-tv.apk"

@@ -32,6 +32,8 @@ public class SettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        getWindow().setBackgroundDrawable(null);  // the page paints its own background
+        MainActivity.initWallpapers(this);
         Clicks.init(this);
         Motion.init(this);
         build();
@@ -318,7 +320,7 @@ public class SettingsActivity extends Activity {
      */
     void pageBackground() {
         java.util.List<String> keys = new java.util.ArrayList<>(), names = new java.util.ArrayList<>();
-        for (int i = 0; i < MainActivity.WALL_COLORS.length; i++) {
+        for (int i = 0; i < MainActivity.READY_WALLS; i++) {  // colours, then the built-in pictures
             keys.add(MainActivity.WALL_KEYS[i]);
             names.add(MainActivity.WALL_NAMES[i]);
         }

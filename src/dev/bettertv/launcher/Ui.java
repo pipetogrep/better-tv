@@ -27,12 +27,16 @@ public final class Ui {
     private Ui() { }
 
     /** Display size in pixels for the window this context is shown on. */
+    @SuppressWarnings("deprecation")  // getRealSize is the only option before Android 11 (minSdk 28)
     static Point screen(Context c) {
         Point p = new Point();
         WindowManager wm = (WindowManager) c.getSystemService(Context.WINDOW_SERVICE);
-        Display d = Build.VERSION.SDK_INT >= 30 && c instanceof Activity ? ((Activity) c).getDisplay() : wm.getDefaultDisplay();
-        if (d == null) d = wm.getDefaultDisplay();
-        d.getRealSize(p);
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Rect b = wm.getMaximumWindowMetrics().getBounds();
+            p.set(b.width(), b.height());
+        } else {
+            wm.getDefaultDisplay().getRealSize(p);
+        }
         if (p.x < p.y) p.set(p.y, p.x);  // TVs are landscape; guard against a transient portrait report
         return p;
     }

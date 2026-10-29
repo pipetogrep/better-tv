@@ -51,6 +51,8 @@ public class SetupActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        getWindow().setBackgroundDrawable(null);  // the page paints its own background
+        MainActivity.initWallpapers(this);
         Clicks.init(this);
         Motion.init(this);
         root = new FrameLayout(this);
@@ -124,6 +126,7 @@ public class SetupActivity extends Activity {
     }
 
     @Override
+    @SuppressWarnings("deprecation")  // the platform replacement (OnBackInvokedCallback) is Android 13+
     public void onBackPressed() {
         back();  // the first page has nowhere to go back to: setup stays until it is finished
     }
@@ -415,7 +418,7 @@ public class SetupActivity extends Activity {
         setBackdrop(cur[0]);
         LinearLayout l = list();
         List<Row> group = new ArrayList<>();
-        for (int i = 0; i < MainActivity.WALL_COLORS.length; i++) {  // photos are chosen in Settings
+        for (int i = 0; i < MainActivity.READY_WALLS; i++) {  // colours and built-in pictures; photos are chosen in Settings
             String key = MainActivity.WALL_KEYS[i];
             Row[] self = new Row[1];
             self[0] = row(l, MainActivity.WALL_NAMES[i], null, RADIO, key.equals(cur[0]), () -> {
@@ -512,7 +515,7 @@ public class SetupActivity extends Activity {
             getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean(K_DONE, true).apply();
             startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
             finish();
-            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+            fadeOut();
         });
         View bottom = new View(this);
         page.addView(bottom, new LinearLayout.LayoutParams(1, 0, 1.4f));
@@ -522,6 +525,11 @@ public class SetupActivity extends Activity {
     public boolean dispatchKeyEvent(android.view.KeyEvent ev) {
         MainActivity.navSound(this, ev);
         return super.dispatchKeyEvent(ev) || Clicks.moveFocus(getWindow(), ev);
+    }
+
+    @SuppressWarnings("deprecation")  // overrideActivityTransition is Android 14+
+    void fadeOut() {
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
     }
 
     @Override

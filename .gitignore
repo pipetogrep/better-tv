@@ -8,3 +8,7 @@ keystore-password.txt
 *.jpg
 *.jpeg
 *.webp
+
+.DS_Store
+# ...except the built-in backgrounds bundled with the app.
+!assets/backgrounds/*.jpg

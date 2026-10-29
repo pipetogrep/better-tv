@@ -163,9 +163,7 @@ public class MainActivity extends Activity {
         screenW = size.x;
         screenH = size.y;
         unit = Ui.unit(this);
-        photoW = screenW;
-        photoH = screenH;
-        photoCacheDir = getCacheDir();
+        initWallpapers(this);
         // Measured from Apple's tvOS 26 Home Screen (1920x1080): dock 48 px from the screen edges,
         // 42 px inner padding and 51 px between icons; cards are 16:9 to fit Android TV banners.
         dockOuter = dp(24);
@@ -615,8 +613,24 @@ public class MainActivity extends Activity {
         if (menuLayer != null && menuLayer.getChildCount() > 0) menuLayer.getChildAt(0).invalidate();
     }
 
-    static final String[] WALL_KEYS = {"black", "graphite", "midnight", "forest", "plum", "slate", "photo"};
-    static final String[] WALL_NAMES = {"Black", "Graphite", "Midnight Blue", "Forest", "Plum", "Slate", "Your Photo"};
+    static final String[] WALL_KEYS = {"black", "graphite", "midnight", "forest", "plum", "slate",
+            "fabric", "orbs", "ribbons", "photo"};
+    static final String[] WALL_NAMES = {"Black", "Graphite", "Midnight Blue", "Forest", "Plum", "Slate",
+            "Fabric", "Orbs", "Ribbons", "Your Photo"};
+    /** WALL_KEYS that are pictures bundled with the app (assets/backgrounds/<key>.jpg). */
+    static final java.util.List<String> BUILT_IN = Arrays.asList("fabric", "orbs", "ribbons");
+    /** How many WALL_KEYS any screen can offer without photo access: the colours and the built-in pictures. */
+    static final int READY_WALLS = 9;
+    static android.content.res.AssetManager assets;
+
+    /** Screen size, photo cache and assets for the background code (static: Settings and Setup use it too). */
+    static void initWallpapers(android.app.Activity a) {
+        android.graphics.Point size = Ui.screen(a);
+        photoW = size.x;
+        photoH = size.y;
+        photoCacheDir = a.getCacheDir();
+        assets = a.getAssets();
+    }
     /** The solid colours, in WALL_KEYS order (the last key, photo, has none). */
     static final int[] WALL_COLORS = {0xFF000000, 0xFF161618, 0xFF0B1324, 0xFF0C1712, 0xFF170F1C, 0xFF12161C};
     static final String DEFAULT_WALL = "graphite";
@@ -732,7 +746,7 @@ public class MainActivity extends Activity {
         return out;
     }
 
-    /** A solid dark colour (a tiny bitmap, scaled up), or today's photo for "photo". */
+    /** A solid dark colour (a tiny bitmap, scaled up), a built-in picture, or a photo. */
     static Bitmap makeWallpaperBase(String style) {
         if (style.startsWith("photo")) {
             try {
@@ -744,6 +758,20 @@ public class MainActivity extends Activity {
                 // no permission or unreadable: fall back below
             }
             style = DEFAULT_WALL;
+        }
+        if (BUILT_IN.contains(style) && assets != null) {
+            try (java.io.InputStream in = assets.open("backgrounds/" + style + ".jpg")) {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inMutable = true;  // bakeShade paints into it
+                Bitmap b = android.graphics.BitmapFactory.decodeStream(in, null, o);
+                if (b != null && (b.getWidth() != photoW || b.getHeight() != photoH)) {
+                    Bitmap s = Bitmap.createScaledBitmap(b, photoW, photoH, true);
+                    b = s.isMutable() ? s : s.copy(Bitmap.Config.ARGB_8888, true);
+                }
+                if (b != null) return b;
+            } catch (Exception | OutOfMemoryError ignored) {
+                // fall back to a colour below
+            }
         }
         int i = java.util.Arrays.asList(WALL_KEYS).indexOf(style);
         if (i < 0 || i >= WALL_COLORS.length) i = java.util.Arrays.asList(WALL_KEYS).indexOf(DEFAULT_WALL);
@@ -979,6 +1007,7 @@ public class MainActivity extends Activity {
 
         @Override public void setAlpha(int a) { }
         @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
+        @SuppressWarnings("deprecation")  // still abstract in Drawable
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
 
@@ -1174,6 +1203,7 @@ public class MainActivity extends Activity {
 
         @Override public void setAlpha(int a) { }
         @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
+        @SuppressWarnings("deprecation")  // still abstract in Drawable
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
 
@@ -1484,6 +1514,7 @@ public class MainActivity extends Activity {
 
         @Override public void setAlpha(int a) { }
         @Override public void setColorFilter(android.graphics.ColorFilter cf) { }
+        @SuppressWarnings("deprecation")  // still abstract in Drawable
         @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
     }
 

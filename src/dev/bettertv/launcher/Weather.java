@@ -34,7 +34,11 @@ final class Weather {
     static final String PREFS = "weather";
     static final String K_ENABLED = "enabled", K_UNITS = "units", K_PLACE = "place", K_LAT = "lat", K_LON = "lon",
             K_MANUAL = "manual", K_SOURCE = "source", K_REFRESH = "refresh_min",
-            K_CACHE = "cache2", K_CACHE_AT = "cache_at", K_CACHE_KEY = "cache_key";
+            K_CACHE = "cache2", K_CACHE_AT = "cache_at", K_CACHE_KEY = "cache_key",
+            K_AUTO_LAT = "auto_lat", K_AUTO_LON = "auto_lon", K_AUTO_PLACE = "auto_place", K_AUTO_AT = "auto_at",
+            K_FALLBACK = "fallback";
+    /** "Use My Location" asks an IP-location service at most this often; otherwise the last answer is reused. */
+    static final long LOCATE_EVERY_MS = 24 * 60 * 60_000L;
     static final String SRC_OPEN_METEO = "openmeteo", SRC_MET = "met", SRC_WTTR = "wttr";
     static final String[] SOURCES = {SRC_OPEN_METEO, SRC_MET, SRC_WTTR};
     static final int[] REFRESH_CHOICES = {10, 15, 30, 60};
@@ -239,16 +243,30 @@ final class Weather {
                     lon = p.getFloat(K_LON, 0);
                     place = p.getString(K_PLACE, "");
                 } else {
-                    double[] ll = new double[2];
-                    place = locate(ll);
-                    lat = ll[0];
-                    lon = ll[1];
+                    // The IP lookup once a day (not every refresh); if it fails, the last answer.
+                    boolean fresh = System.currentTimeMillis() - p.getLong(K_AUTO_AT, 0) < LOCATE_EVERY_MS;
+                    if (!fresh || !p.contains(K_AUTO_LAT)) {
+                        try {
+                            double[] ll = new double[2];
+                            String pl = locate(ll);
+                            p.edit().putFloat(K_AUTO_LAT, (float) ll[0]).putFloat(K_AUTO_LON, (float) ll[1])
+                                    .putString(K_AUTO_PLACE, pl).putLong(K_AUTO_AT, System.currentTimeMillis()).apply();
+                        } catch (Exception e) {
+                            if (!p.contains(K_AUTO_LAT)) throw e;
+                        }
+                    }
+                    lat = p.getFloat(K_AUTO_LAT, 0);
+                    lon = p.getFloat(K_AUTO_LON, 0);
+                    place = p.getString(K_AUTO_PLACE, "");
                 }
+                // About 1 km of precision is plenty for a forecast, and is all that leaves the TV.
+                lat = Math.round(lat * 100) / 100.0;
+                lon = Math.round(lon * 100) / 100.0;
                 boolean f = units(c).equals("f");
-                // The chosen source first, then the others.
+                // The chosen source; the others only if allowed in Settings (they'd get the location too).
                 List<String> order = new ArrayList<>();
                 order.add(source(c));
-                for (String s : SOURCES) if (!order.contains(s)) order.add(s);
+                if (p.getBoolean(K_FALLBACK, false)) for (String s : SOURCES) if (!order.contains(s)) order.add(s);
                 Data d = null;
                 for (String s : order) {
                     try {

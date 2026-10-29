@@ -7,22 +7,17 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.Settings;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 /**
- * Better TV's accessibility switch, turned on by the user in the TV's Accessibility settings. It:
- * - puts the TV to sleep (Power Off, Sleep Timer) on TVs where device admin is switched off;
- * - closes apps for Clean by pressing Force stop on each app's info page;
+ * Better TV's accessibility switch, turned on by the user in the TV's Accessibility settings. It
+ * only watches the TV's own launcher(s) (its event filter is narrowed to their packages), and:
  * - Home button: when the TV's own launcher comes up (Home pressed, or Back out of an app) while
  *   Better TV isn't the home app, opens Better TV instead, so the stock launcher needn't be disabled. Only
  *   the package and class of the window that opened are looked at, nothing on screen;
@@ -33,15 +28,13 @@ public class PowerService extends AccessibilityService {
     static PowerService instance;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final List<String> queue = new ArrayList<>();
-    private Runnable onDone;
-    private int step;
 
     private BroadcastReceiver screenOn;
 
     @Override
     protected void onServiceConnected() {
         instance = this;
+        narrowToStockHomes();
         screenOn = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent i) {
                 Startup.onScreenOn(c);
@@ -53,6 +46,19 @@ public class PowerService extends AccessibilityService {
         // The stock launcher may already be on screen (just booted, or the switch was turned on
         // over it): no window change will be reported for it, so look once now.
         handler.postDelayed(this::homeIfStockShowing, 800);
+    }
+
+    /**
+     * Least privilege: receive window events (and read window owners) only for the TV's other
+     * launchers, not for every app. Re-applied when apps change, since a launcher may be added.
+     */
+    void narrowToStockHomes() {
+        android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+        if (info == null) return;
+        Set<String> pkgs = new HashSet<>();
+        for (String h : HomeButton.stockHomes(this)) pkgs.add(h.substring(0, h.indexOf('/')));
+        info.packageNames = pkgs.isEmpty() ? new String[]{"android"} : pkgs.toArray(new String[0]);
+        setServiceInfo(info);
     }
 
     private void homeIfStockShowing() {
@@ -71,7 +77,7 @@ public class PowerService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
-        if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || !queue.isEmpty()) return;
+        if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
         CharSequence pkg = e.getPackageName(), cls = e.getClassName();
         if (pkg == null || cls == null || !HomeButton.wanted(this)) return;
         if (!HomeButton.stockHomes(this).contains(pkg + "/" + cls)) return;
@@ -94,81 +100,7 @@ public class PowerService extends AccessibilityService {
         super.onDestroy();
     }
 
-    /** Screen off / sleep. Returns false when the service isn't on. */
-    static boolean sleep() {
-        PowerService s = instance;
-        return s != null && android.os.Build.VERSION.SDK_INT >= 28 && s.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
-    }
-
-    /** Force-stops each app via its App info page, then returns to Better TV and runs {@code done}. */
-    static void forceStop(Context c, List<String> pkgs, Runnable done) {
-        PowerService s = instance;
-        if (s == null) {
-            done.run();
-            return;
-        }
-        s.queue.clear();
-        s.queue.addAll(pkgs);
-        s.onDone = done;
-        s.next();
-    }
-
-    private void next() {
-        if (queue.isEmpty()) {
-            Intent home = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            startActivity(home);
-            if (onDone != null) handler.postDelayed(onDone, 300);
-            onDone = null;
-            return;
-        }
-        String pkg = queue.remove(0);
-        try {
-            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_HISTORY));
-        } catch (Exception e) {
-            next();
-            return;
-        }
-        step = 0;
-        handler.postDelayed(this::pressForceStop, 900);
-    }
-
-    /** Presses "Force stop", then the confirmation "OK"; gives up on an app after a few tries. */
-    private void pressForceStop() {
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        boolean clicked = false;
-        if (root != null) {
-            String[] labels = step == 0 ? new String[]{"Force stop", "FORCE STOP", "Force Stop"} : new String[]{"OK", "Ok"};
-            for (String l : labels) {
-                List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText(l);
-                for (AccessibilityNodeInfo n : found) {
-                    AccessibilityNodeInfo t = n;
-                    while (t != null && !t.isClickable()) t = t.getParent();
-                    if (t != null && t.isEnabled() && t.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                        clicked = true;
-                        break;
-                    }
-                }
-                if (clicked) break;
-            }
-        }
-        if (clicked && step == 0) {
-            step = 1;
-            handler.postDelayed(this::pressForceStop, 600);
-            return;
-        }
-        if (!clicked && step == 0 && retries++ < 3) {
-            handler.postDelayed(this::pressForceStop, 500);
-            return;
-        }
-        retries = 0;
-        performGlobalAction(GLOBAL_ACTION_BACK);
-        handler.postDelayed(this::next, 400);
-    }
-
-    private int retries;
-
-    /** Home button override (see the class comment); the switch lives in Settings → Home. */
+    /** Home button override (see the class comment); the switch lives in Settings → Home Button. */
     static final class HomeButton {
         private static Set<String> homes;
         private static long homesAt;

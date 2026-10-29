@@ -227,28 +227,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // adb perf probe: --es perf weather|status|hero|dockglass|shadows hides one layer to measure its GPU cost.
-        String perf = intent.getStringExtra("perf");
-        if (perf != null) {
-            switch (perf) {
-                case "weather": weatherCard.setVisibility(View.GONE); break;
-                case "status": clockBox.setVisibility(View.GONE); break;
-                case "dockglass": if (dockRow != null) dockRow.setBackground(null); break;
-                case "shadows": for (View t : tiles) t.setElevation(0); break;
-                default: recreate(); break;
-            }
-            return;
-        }
-        // adb hook for screenshots: am start -n dev.bettertv.launcher/.MainActivity --es panel cc|inputs|weather
+        // adb hook for screenshots: am start -n dev.bettertv.launcher/.MainActivity --es panel inputs|weather
         String panel = intent.getStringExtra("panel");
-        if (panel != null) {
+        if (panel != null && Ui.fromAdb(this)) {
             closeMenu();
             if (panel.equals("inputs")) showInputs(settingsButton);
             else if (panel.equals("weather")) showWeather();
             return;
         }
         // Home always lands on the first app in the dock: close any overlay first
-        // (Control Center, profiles, Inputs, weather forecast, menus, move mode, folder).
+        // (Inputs, weather forecast, menus, move mode, folder).
         if (pickerLayer != null) {
             popoverReturn = null;
             FrameLayout l = pickerLayer;
@@ -2416,34 +2404,18 @@ public class MainActivity extends Activity {
         }
     }
 
-    int netState = -1, netBars = -1;
-    boolean netEthernet;
+    int netState = -1;
 
+    /** Online state only (no Wi-Fi details): coming back online refreshes the weather. */
     void updateNet() {
         android.net.ConnectivityManager cm = getSystemService(android.net.ConnectivityManager.class);
         android.net.NetworkCapabilities nc = cm.getNetworkCapabilities(cm.getActiveNetwork());
         int state = nc == null ? 0
                 : nc.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 2 : 1;
-        boolean eth = nc != null && nc.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET);
-        int bars = 3;
-        if (nc != null && !eth) {
-            try {
-                android.net.wifi.WifiManager wm = getApplicationContext().getSystemService(android.net.wifi.WifiManager.class);
-                int level = android.net.wifi.WifiManager.calculateSignalLevel(wm.getConnectionInfo().getRssi(), 4);
-                bars = level <= 1 ? 1 : level == 2 ? 2 : 3;
-            } catch (Exception ignored) {
-                // keep full bars
-            }
-        }
         boolean back = netState == 0 || netState == 1;
-        if (state == netState && eth == netEthernet && bars == netBars) return;
+        if (state == netState) return;
         netState = state;
-        netEthernet = eth;
-        netBars = bars;
-        // Back online: refresh what needs the internet.
-        if (state == 2 && back) {
-            Weather.refresh(this, true, this::updateWeather);
-        }
+        if (state == 2 && back) Weather.refresh(this, true, this::updateWeather);
     }
 
     /** Android TV's system click on D-pad moves, select and Back (Settings -> Home -> Navigation sounds). */

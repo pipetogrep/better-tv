@@ -79,12 +79,12 @@ public class SetupActivity extends Activity {
         steps.add(this::weather);
         steps.add(this::homeAndPermissions);
         steps.add(this::finish_);
-        if (getIntent().getBooleanExtra("skip", false)) {  // adb: --ez skip true marks setup as done
+        if (getIntent().getBooleanExtra("skip", false) && Ui.fromAdb(this)) {  // adb: --ez skip true marks setup as done
             getSharedPreferences("setup", MODE_PRIVATE).edit().putBoolean(K_DONE, true).apply();
             finish();
             return;
         }
-        show(getIntent().getIntExtra("step", 0), 0);  // adb: --ei step N opens a page directly
+        show(Ui.fromAdb(this) ? getIntent().getIntExtra("step", 0) : 0, 0);  // adb: --ei step N opens a page directly
     }
 
     int u(float v) {
@@ -450,6 +450,10 @@ public class SetupActivity extends Activity {
                     Weather.prefs(this).edit().putBoolean(Weather.K_ENABLED, true).apply();
                     Weather.setPlace(this, null);
                     select(group, auto[0]);
+                    int here = index;  // looked up only now that it was chosen
+                    Weather.refresh(this, true, () -> {
+                        if (index == here && !Weather.place(this).isEmpty()) auto[0].detail("Looks like " + Weather.place(this));
+                    });
                 });
         pick[0] = row(l, "Choose a City…", manual ? Weather.place(this) : "Search by name (opens Settings)", RADIO, on && manual, () -> {
             Weather.prefs(this).edit().putBoolean(Weather.K_ENABLED, true).apply();
@@ -463,13 +467,6 @@ public class SetupActivity extends Activity {
         group.add(auto[0]);
         group.add(pick[0]);
         group.add(off[0]);
-        if (city.isEmpty()) {
-            int here = index;
-            Weather.refresh(this, true, () -> {
-                if (index == here) auto[0].detail(Weather.place(this).isEmpty() ? "Found from your internet connection"
-                        : "Looks like " + Weather.place(this));
-            });
-        }
         buttons("Continue", this::next);
         dots();
     }

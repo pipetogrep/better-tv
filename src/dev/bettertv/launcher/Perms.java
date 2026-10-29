@@ -27,10 +27,6 @@ final class Perms {
     private Perms() {
     }
 
-    static ComponentName admin(Activity a) {
-        return new ComponentName(a, SleepReceiver.Admin.class);
-    }
-
     static Intent accessibilityScreen(Activity a) {
         Intent i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
         ComponentName cn = i.resolveActivity(a.getPackageManager());

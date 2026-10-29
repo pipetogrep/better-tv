@@ -15,6 +15,15 @@ import android.widget.TextView;
  * so 720p, 1080p and 4K outputs (and any density setting) get the same proportions.
  */
 public final class Ui {
+
+    /**
+     * True when the activity was started from adb (the shell). The testing hooks (open a panel,
+     * skip setup, jump to a page) only listen to that, so other apps on the TV can't trigger them.
+     */
+    static boolean fromAdb(android.app.Activity a) {
+        android.net.Uri r = a.getReferrer();
+        return r != null && "com.android.shell".equals(r.getHost());
+    }
     private Ui() { }
 
     /** Display size in pixels for the window this context is shown on. */

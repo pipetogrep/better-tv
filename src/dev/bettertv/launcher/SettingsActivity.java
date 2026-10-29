@@ -236,8 +236,15 @@ public class SettingsActivity extends Activity {
                 Weather.changed(this);
                 refreshAll();
                 d.dismiss();
-                Toast.makeText(this, "If it can't be reached, the other sources are used.", Toast.LENGTH_LONG).show();
+
             }).show();
+        });
+        row("If the source is down", () -> Weather.prefs(this).getBoolean(Weather.K_FALLBACK, false)
+                ? "Try the other sources" : "Wait for it", () -> {
+            boolean on = !Weather.prefs(this).getBoolean(Weather.K_FALLBACK, false);
+            Weather.prefs(this).edit().putBoolean(Weather.K_FALLBACK, on).apply();
+            if (on) Toast.makeText(this, "Your rounded location is then also sent to the other weather services.",
+                    Toast.LENGTH_LONG).show();
         });
         row("Update every", () -> Weather.refreshMinutes(this) + " minutes", () -> {
             int[] mins = Weather.REFRESH_CHOICES;

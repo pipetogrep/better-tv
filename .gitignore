@@ -3,3 +3,8 @@ signing.keystore
 debug.keystore
 *.jks
 keystore-password.txt
+
+# Background photos live on the TV (Pictures/BetterTV), never in the repo or the APK.
+*.jpg
+*.jpeg
+*.webp

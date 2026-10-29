@@ -1,0 +1,80 @@
+name: Build
+
+# Every push to master builds the APK (kept as a workflow artifact).
+# Pushing a version tag (v1.2.3) also publishes it as a GitHub Release.
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK pieces build.sh needs
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;34.0.0" "platforms;android-34" > /dev/null
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.0.${{ github.run_number }}-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Signing key
+        # The same key as local builds, so release APKs install over them as updates.
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No SIGNING_KEYSTORE_B64 secret: building with a throwaway debug key."
+          fi
+
+      - name: Build
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          RELEASE_KEYSTORE_PASS: ${{ secrets.SIGNING_KEYSTORE_PASS }}
+          RELEASE_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+        run: |
+          ./build.sh
+          cp build/better-tv.apk "better-tv-${{ steps.version.outputs.name }}.apk"
+
+      - name: No pictures in the APK
+        # Backgrounds come from the TV's Pictures/BetterTV folder, never from the app.
+        run: |
+          if unzip -l better-tv-*.apk | grep -iE '\.(jpe?g|webp)$'; then
+            echo "::error::The APK contains photos"; exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: better-tv-${{ steps.version.outputs.name }}
+          path: better-tv-*.apk
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" better-tv-*.apk \
+            --title "Better TV ${{ steps.version.outputs.name }}" --generate-notes

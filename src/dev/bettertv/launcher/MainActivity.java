@@ -590,6 +590,24 @@ public class MainActivity extends Activity {
         wallView.setImageBitmap(wp);
         glassBg = Ui.glassBackdrop(wp, 192, 108);
         invalidateGlass();
+        retryPhotoIfMissing(style, wp);
+    }
+
+    int wallRetries;
+
+    /**
+     * After a reboot Home starts before shared storage is mounted, so a photo background comes out
+     * as the fallback colour; try again every few seconds for a minute instead of keeping it all day.
+     */
+    void retryPhotoIfMissing(String style, Bitmap shown) {
+        if (!style.startsWith("photo") || shown.getWidth() > 64) {
+            wallRetries = 0;
+            return;
+        }
+        if (wallRetries++ >= 20) return;
+        handler.postDelayed(() -> {
+            if (!isDestroyed() && style.equals(wallStyle)) changeWallpaper(style);
+        }, 3000);
     }
 
     /** A new background after start-up: decoded on io, shown when ready (the old one stays till then). */
@@ -602,6 +620,7 @@ public class MainActivity extends Activity {
                 wallView.setImageBitmap(wp);
                 glassBg = blur;
                 invalidateGlass();
+                retryPhotoIfMissing(style, wp);
             });
         });
     }
